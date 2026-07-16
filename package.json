@@ -1,6 +1,17 @@
-"dependencies": {
-  "@fal-ai/client": "^1.1.2",
-  "cors": "^2.8.5",
-  "express": "^4.19.2"
+{
+  "name": "magic-tortoise-backend",
+  "version": "1.0.0",
+  "description": "Backend video generator service for Magic Tortoise",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@fal-ai/client": "^1.1.2",
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }
-
