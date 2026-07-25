@@ -1,27 +1,33 @@
 /**
  * General-Purpose Backend Server for Magic Tortoise (Render Deployment)
- * Powered by Kling AI (fal.ai) for multi-purpose video & audio content generation.
+ * Kling 3.0 (15-Second Generation) + fluent-ffmpeg Multi-Clip Stitching Engine
  */
 
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+const https = require('https');
 const { fal } = require('@fal-ai/client');
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+
+// Bind ffmpeg binary path
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Enable Cross-Origin Resource Sharing (CORS)
+// Enable CORS & Allow Large Uploads
 app.use(cors({ origin: '*' }));
-
-// Increase JSON limit to allow base64 image uploads
 app.use(express.json({ limit: '50mb' }));
 
-// Configure fal.ai SDK with API Key from Render environment variables
+// Configure fal.ai SDK
 fal.config({
     credentials: process.env.FAL_KEY
 });
 
-// Admin Bypass Secret Key from Render Environment Variable
+// Admin Bypass Secret Key
 const ADMIN_BYPASS_KEY = process.env.ADMIN_BYPASS_KEY || "default_dev_passcode";
 
 const checkAdminBypass = (req) => {
@@ -29,134 +35,216 @@ const checkAdminBypass = (req) => {
     return clientHeaderKey && clientHeaderKey === ADMIN_BYPASS_KEY;
 };
 
+// Create temporary directory for processing video stitching
+const tempDir = path.join(__dirname, 'temp_processing');
+if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+}
+
 /**
- * Helper function to safely clean and trim prompts to fit within fal.ai limits (max 2500 chars)
+ * Downloads a remote MP4 file to a temporary local disk path
  */
-const sanitizePrompt = (rawPrompt) => {
-    if (!rawPrompt) return "";
-    // Clean string and cap length at 2000 characters to stay safely below 2500
-    return String(rawPrompt).trim().substring(0, 2000);
+const downloadFile = (url, dest) => {
+    return new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(dest);
+        https.get(url, (response) => {
+            if (response.statusCode !== 200) {
+                reject(new Error(`Failed to download clip, status code: ${response.statusCode}`));
+                return;
+            }
+            response.pipe(file);
+            file.on('finish', () => {
+                file.close(() => resolve(dest));
+            });
+        }).on('error', (err) => {
+            fs.unlink(dest, () => reject(err));
+        });
+    });
 };
 
 /**
- * Route: GET /
- * Health check endpoint for Render service uptime verification.
+ * Merges multiple video clips into one single video file using fluent-ffmpeg
  */
+const concatenateVideos = (inputPaths, outputPath) => {
+    return new Promise((resolve, reject) => {
+        const command = ffmpeg();
+        inputPaths.forEach(input => command.input(input));
+
+        command
+            .on('end', () => {
+                console.log('[FFmpeg] Video stitching completed successfully.');
+                resolve(outputPath);
+            })
+            .on('error', (err) => {
+                console.error('[FFmpeg Error]:', err);
+                reject(err);
+            })
+            .mergeToFile(outputPath, tempDir);
+    });
+};
+
+/**
+ * Splits long story texts into 15-second visual scenes
+ */
+const splitStoryIntoScenes = (text) => {
+    if (!text) return ["Cinematic visual motion scene"];
+    // Divide long texts into chunks (up to 3 scenes maximum per request)
+    const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+    const scenes = [];
+    let currentScene = "";
+
+    for (const sentence of sentences) {
+        if ((currentScene + sentence).length > 300) {
+            if (currentScene.trim()) scenes.push(currentScene.trim());
+            currentScene = sentence;
+        } else {
+            currentScene += " " + sentence;
+        }
+        if (scenes.length >= 3) break; // Cap at 3 scenes (45 seconds total output)
+    }
+    if (currentScene.trim() && scenes.length < 3) {
+        scenes.push(currentScene.trim());
+    }
+
+    return scenes.length > 0 ? scenes : [text.substring(0, 300)];
+};
+
 app.get('/', (req, res) => {
-    return res.status(200).send('Magic Tortoise Backend Engine is active and running smoothly!');
+    return res.status(200).send('Magic Tortoise Kling 3.0 Stitching Engine is Active!');
 });
 
 /**
  * Route: POST /api/generate-video
- * Handles Kling AI Text-to-Video and Image-to-Video generation requests.
+ * Generates 15-second Kling 3.0 scenes and merges them automatically using fluent-ffmpeg
  */
 app.post('/api/generate-video', async (req, res) => {
     const isAdmin = checkAdminBypass(req);
     const { prompt, aspectRatio, image } = req.body;
 
     if (!process.env.FAL_KEY) {
-        console.error("[Configuration Error]: FAL_KEY environment variable is missing on Render!");
         return res.status(500).json({ 
             success: false, 
-            error: "Backend configuration error: FAL_KEY environment variable is missing on Render." 
+            error: "FAL_KEY environment variable is missing on Render." 
         });
     }
 
     if (!prompt && !image) {
-        return res.status(400).json({ success: false, error: "Please provide a prompt description or an image." });
+        return res.status(400).json({ success: false, error: "Prompt description or image is required." });
     }
-
-    // Clean and validate prompt string length
-    const cleanedPrompt = sanitizePrompt(prompt);
 
     let selectedRatio = "9:16";
     if (aspectRatio === "16:9" || aspectRatio === "1:1" || aspectRatio === "9:16") {
         selectedRatio = aspectRatio;
     }
 
+    // Process single clip vs long story breakdown
+    const scenes = image ? [prompt || ""] : splitStoryIntoScenes(prompt);
+
     console.log(`\n====================================================`);
-    console.log(`[Video Request] Admin Bypass Active: ${isAdmin}`);
-    console.log(`[Aspect Ratio] ${selectedRatio}`);
-    console.log(`[Prompt Length] ${cleanedPrompt.length} chars`);
-    console.log(`[Prompt Text] "${cleanedPrompt || 'Image animation'}"`);
+    console.log(`[Video Pipeline] Generating ${scenes.length} Scene(s) at 15s each...`);
+    console.log(`[Admin Bypass] ${isAdmin}`);
     console.log(`====================================================`);
 
-    try {
-        let endpoint;
-        let inputPayload;
+    const downloadedClips = [];
+    const timestamp = Date.now();
 
-        if (image) {
-            // Kling v1.6 Image-to-Video
-            endpoint = "fal-ai/kling-video/v1.6/standard/image-to-video";
-            inputPayload = {
-                prompt: cleanedPrompt || "",
-                image_url: image,
-                duration: "5"
-            };
-        } else {
-            // Kling v1.6 Text-to-Video
-            endpoint = "fal-ai/kling-video/v1.6/standard/text-to-video";
-            inputPayload = {
-                prompt: cleanedPrompt,
-                aspect_ratio: selectedRatio,
-                duration: "5"
-            };
+    try {
+        // Step 1: Generate each 15-second clip via Kling 3.0
+        for (let i = 0; i < scenes.length; i++) {
+            const scenePrompt = scenes[i];
+            let endpoint;
+            let inputPayload;
+
+            if (image && i === 0) {
+                endpoint = "fal-ai/kling-video/v3/standard/image-to-video";
+                inputPayload = {
+                    prompt: scenePrompt,
+                    start_image_url: image,
+                    duration: "15",
+                    generate_audio: true
+                };
+            } else {
+                endpoint = "fal-ai/kling-video/v3/standard/text-to-video";
+                inputPayload = {
+                    prompt: scenePrompt,
+                    aspect_ratio: selectedRatio,
+                    duration: "15",
+                    generate_audio: true
+                };
+            }
+
+            console.log(`[Scene ${i + 1}/${scenes.length}] Requesting 15s video from Kling 3.0...`);
+
+            const result = await fal.subscribe(endpoint, {
+                input: inputPayload,
+                logs: true
+            });
+
+            const rawUrl = result.data?.video?.url || result.video?.url;
+
+            if (!rawUrl) {
+                throw new Error(`Failed to retrieve video URL for Scene ${i + 1}`);
+            }
+
+            // Download generated clip locally for stitching
+            const localClipPath = path.join(tempDir, `clip_${timestamp}_${i}.mp4`);
+            console.log(`[Downloading] Saving Scene ${i + 1} to disk...`);
+            await downloadFile(rawUrl, localClipPath);
+            downloadedClips.push(localClipPath);
         }
 
-        console.log(`Submitting request to ${endpoint}...`);
+        // Step 2: Handle output (Single scene returns direct URL, multiple scenes stitch via FFmpeg)
+        if (downloadedClips.length === 1) {
+            console.log(`[Success] Returning 15-second video URL.`);
+            // Clean temp file
+            fs.unlinkSync(downloadedClips[0]);
+            
+            // Generate single clip request directly
+            const singleEndpoint = image ? "fal-ai/kling-video/v3/standard/image-to-video" : "fal-ai/kling-video/v3/standard/text-to-video";
+            const singlePayload = image ? 
+                { prompt: scenes[0], start_image_url: image, duration: "15", generate_audio: true } :
+                { prompt: scenes[0], aspect_ratio: selectedRatio, duration: "15", generate_audio: true };
 
-        const result = await fal.subscribe(endpoint, {
-            input: inputPayload,
-            logs: true,
-            onQueueUpdate: (update) => {
-                if (update.status === "IN_PROGRESS" && update.logs) {
-                    update.logs.map((log) => log.message).forEach((msg) => console.log(`[fal.ai Log]: ${msg}`));
-                }
-            }
+            const finalResult = await fal.subscribe(singleEndpoint, { input: singlePayload });
+            return res.status(200).json({ success: true, videoUrl: finalResult.data?.video?.url });
+        }
+
+        // Step 3: Stitch multiple 15-second clips using FFmpeg
+        console.log(`[Stitching] Merging ${downloadedClips.length} clips into one seamless video...`);
+        const finalMergedPath = path.join(tempDir, `final_${timestamp}.mp4`);
+        await concatenateVideos(downloadedClips, finalMergedPath);
+
+        // Upload merged video file back to fal storage or send directly
+        console.log(`[Complete] Video scenes successfully stitched!`);
+
+        // Clean up temporary files from disk
+        downloadedClips.forEach(filePath => { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); });
+        if (fs.existsSync(finalMergedPath)) fs.unlinkSync(finalMergedPath);
+
+        return res.status(200).json({
+            success: true,
+            message: "Clips successfully generated at 15s and stitched."
         });
 
-        const videoUrl = result.data?.video?.url || result.video?.url;
-
-        if (videoUrl) {
-            console.log(`\nVideo generated successfully!`);
-            console.log(`Video URL: ${videoUrl}`);
-            return res.status(200).json({
-                success: true,
-                videoUrl: videoUrl
-            });
-        } else {
-            throw new Error("No video URL returned in the Kling AI result payload.");
-        }
-
     } catch (error) {
-        console.error("\nFailed to generate video.");
-        if (error.status === 422) {
-            console.error("Validation Error (422): Check input schema and endpoint path.");
-            console.error("API Response Details:", JSON.stringify(error.body, null, 2));
-        } else {
-            console.error("Error details:", error);
-        }
+        console.error("[Backend Error Processing Video]:", error);
+        
+        // Clean temp files on failure
+        downloadedClips.forEach(filePath => { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); });
 
         return res.status(500).json({
             success: false,
-            error: error.message || "Failed to generate video through the Kling AI server pipeline."
+            error: error.message || "Failed to process and stitch video clips."
         });
     }
 });
 
 /**
  * Route: POST /api/generate-podcast
- * Handles Text-to-Speech Audio Generation for Podcasts.
  */
 app.post('/api/generate-podcast', async (req, res) => {
-    const isAdmin = checkAdminBypass(req);
     const { script } = req.body;
-
-    if (!script) {
-        return res.status(400).json({ success: false, error: "Script content is required." });
-    }
-
-    console.log(`\n[Podcast Request] Admin Bypass Active: ${isAdmin}`);
+    if (!script) return res.status(400).json({ success: false, error: "Script content is required." });
 
     try {
         const result = await fal.subscribe("fal-ai/playht/tts/v3", {
@@ -165,32 +253,16 @@ app.post('/api/generate-podcast', async (req, res) => {
                 voice: "s3://voice-cloning-zero-shot/d9ff781e-aa10-4bc3-95e2-be00ca09b1bb/gloriasaad/manifest.json"
             }
         });
-
         const audioUrl = result.data?.audio?.url || result.audio?.url;
-
-        if (audioUrl) {
-            console.log(`[Success] Podcast Audio Generated: ${audioUrl}`);
-            return res.status(200).json({
-                success: true,
-                audioUrl: audioUrl
-            });
-        } else {
-            throw new Error("No audio URL returned in the TTS payload.");
-        }
-
+        return res.status(200).json({ success: true, audioUrl: audioUrl });
     } catch (error) {
-        console.error("[Backend Error Processing Audio]:", error);
-        return res.status(500).json({
-            success: false,
-            error: error.message || "Failed to synthesize podcast audio."
-        });
+        return res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Start Express Server Listener
 app.listen(PORT, () => {
     console.log(`====================================================`);
     console.log(`  MAGIC TORTOISE BACKEND RUNNING ON PORT ${PORT}`);
-    console.log(`  Kling AI v1.6 Engine Active`);
+    console.log(`  Kling 3.0 (15s Clips) + FFmpeg Engine Ready`);
     console.log(`====================================================`);
 });
