@@ -11,11 +11,9 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 // Enable Cross-Origin Resource Sharing (CORS)
-app.use(cors({
-    origin: '*'
-}));
+app.use(cors({ origin: '*' }));
 
-// Increase JSON limit to allow base64 image uploads for image-to-video requests
+// Increase JSON limit to allow base64 image uploads
 app.use(express.json({ limit: '50mb' }));
 
 // Configure fal.ai SDK with API Key from Render environment variables
@@ -26,29 +24,19 @@ fal.config({
 // Admin Bypass Secret Key from Render Environment Variable
 const ADMIN_BYPASS_KEY = process.env.ADMIN_BYPASS_KEY || "default_dev_passcode";
 
-// Middleware helper to verify admin bypass status
 const checkAdminBypass = (req) => {
     const clientHeaderKey = req.headers['x-admin-bypass'];
     return clientHeaderKey && clientHeaderKey === ADMIN_BYPASS_KEY;
 };
 
-/**
- * Route: GET /
- * Health check endpoint so browser visits display "Active" instead of "Cannot GET /"
- */
 app.get('/', (req, res) => {
     return res.status(200).send('Magic Tortoise Backend Engine is active and running smoothly!');
 });
 
-/**
- * Route: POST /api/generate-video
- * Handles Kling Text-to-Video and Image-to-Video requests
- */
 app.post('/api/generate-video', async (req, res) => {
     const isAdmin = checkAdminBypass(req);
     const { prompt, aspectRatio, image } = req.body;
 
-    // Configuration Guardrail
     if (!process.env.FAL_KEY) {
         console.error("[Configuration Error]: FAL_KEY environment variable is missing on Render!");
         return res.status(500).json({ 
@@ -61,7 +49,6 @@ app.post('/api/generate-video', async (req, res) => {
         return res.status(400).json({ success: false, error: "Please provide a prompt description or an image." });
     }
 
-    // Clean up ratio formatting
     let selectedRatio = "9:16";
     if (aspectRatio === "16:9" || aspectRatio === "1:1" || aspectRatio === "9:16") {
         selectedRatio = aspectRatio;
@@ -78,38 +65,28 @@ app.post('/api/generate-video', async (req, res) => {
         let inputPayload;
 
         if (image) {
-            // Kling Image-to-Video Payload
-            console.log("Routing request to Kling (Image-to-Video)...");
-            endpoint = "fal-ai/kling-video/v1.5/pro/image-to-video";
+            // Kling Image-to-Video (no aspect_ratio parameter allowed)
+            endpoint = "fal-ai/kling-video/v1.5/standard/image-to-video";
             inputPayload = {
                 prompt: prompt || "",
                 image_url: image,
-                duration: "5",
-                aspect_ratio: selectedRatio
+                duration: 5 // Must be a number integer (5 or 10)
             };
         } else {
-            // Kling Text-to-Video Payload
-            console.log("Routing request to Kling (Text-to-Video)...");
-            endpoint = "fal-ai/kling-video/v1.5/pro/text-to-video";
+            // Kling Text-to-Video
+            endpoint = "fal-ai/kling-video/v1.5/standard/text-to-video";
             inputPayload = {
                 prompt: prompt,
                 aspect_ratio: selectedRatio,
-                duration: "5"
+                duration: 5 // Must be a number integer (5 or 10)
             };
         }
 
-        // Send generation request to fal.ai
         const result = await fal.subscribe(endpoint, {
             input: inputPayload,
-            logs: true,
-            onQueueUpdate: (update) => {
-                if (update.status === "IN_PROGRESS") {
-                    console.log(`[fal.ai Kling Queue]: Rendering video sequence...`);
-                }
-            }
+            logs: true
         });
 
-        // Extract video URL safely from payload response
         const videoUrl = result.data?.video?.url || result.video?.url;
 
         if (videoUrl) {
@@ -124,6 +101,12 @@ app.post('/api/generate-video', async (req, res) => {
 
     } catch (error) {
         console.error("[Backend Error Processing Video]:", error);
+        
+        // Print the exact field that failed validation if fal rejects it
+        if (error.body && error.body.detail) {
+            console.error("[fal.ai Validation Details]:", JSON.stringify(error.body.detail));
+        }
+
         return res.status(500).json({
             success: false,
             error: error.message || "Failed to generate video through the Kling AI server pipeline."
@@ -131,10 +114,6 @@ app.post('/api/generate-video', async (req, res) => {
     }
 });
 
-/**
- * Route: POST /api/generate-podcast
- * Handles Text-to-Speech Audio Generation for Podcasts
- */
 app.post('/api/generate-podcast', async (req, res) => {
     const isAdmin = checkAdminBypass(req);
     const { script } = req.body;
@@ -142,8 +121,6 @@ app.post('/api/generate-podcast', async (req, res) => {
     if (!script) {
         return res.status(400).json({ success: false, error: "Script content is required." });
     }
-
-    console.log(`\n[Podcast Request] Admin Bypass Active: ${isAdmin}`);
 
     try {
         const result = await fal.subscribe("fal-ai/playht/tts/v3", {
@@ -156,15 +133,10 @@ app.post('/api/generate-podcast', async (req, res) => {
         const audioUrl = result.data?.audio?.url || result.audio?.url;
 
         if (audioUrl) {
-            console.log(`[Success] Podcast Audio Generated: ${audioUrl}`);
-            return res.status(200).json({
-                success: true,
-                audioUrl: audioUrl
-            });
+            return res.status(200).json({ success: true, audioUrl: audioUrl });
         } else {
             throw new Error("No audio URL returned in the TTS payload.");
         }
-
     } catch (error) {
         console.error("[Backend Error Processing Audio]:", error);
         return res.status(500).json({
@@ -174,10 +146,8 @@ app.post('/api/generate-podcast', async (req, res) => {
     }
 });
 
-// Start Server Listener
 app.listen(PORT, () => {
     console.log(`====================================================`);
     console.log(`  MAGIC TORTOISE BACKEND RUNNING ON PORT ${PORT}`);
-    console.log(`  Kling Engine & Admin Bypass Active`);
     console.log(`====================================================`);
 });
