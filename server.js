@@ -8,12 +8,12 @@ const cors = require('cors');
 const { fal } = require('@fal-ai/client');
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+const PORT = process.process?.env?.PORT || 10000;
 
 // Enable Cross-Origin Resource Sharing (CORS)
 app.use(cors({ origin: '*' }));
 
-// Increase JSON limit to allow base64 image uploads
+// Increase JSON limit to allow base64 image uploads for image-to-video requests
 app.use(express.json({ limit: '50mb' }));
 
 // Configure fal.ai SDK with API Key from Render environment variables
@@ -29,10 +29,18 @@ const checkAdminBypass = (req) => {
     return clientHeaderKey && clientHeaderKey === ADMIN_BYPASS_KEY;
 };
 
+/**
+ * Route: GET /
+ * Health check endpoint for Render service uptime verification.
+ */
 app.get('/', (req, res) => {
     return res.status(200).send('Magic Tortoise Backend Engine is active and running smoothly!');
 });
 
+/**
+ * Route: POST /api/generate-video
+ * Handles Kling AI Text-to-Video and Image-to-Video generation requests.
+ */
 app.post('/api/generate-video', async (req, res) => {
     const isAdmin = checkAdminBypass(req);
     const { prompt, aspectRatio, image } = req.body;
@@ -65,16 +73,16 @@ app.post('/api/generate-video', async (req, res) => {
         let inputPayload;
 
         if (image) {
-            // Kling 3.0 Image-to-Video
-            endpoint = "fal-ai/kling-video/v3/standard/image-to-video";
+            // Kling v1.6 Image-to-Video
+            endpoint = "fal-ai/kling-video/v1.6/standard/image-to-video";
             inputPayload = {
                 prompt: prompt || "",
-                start_image_url: image,
+                image_url: image,
                 duration: "5"
             };
         } else {
-            // Kling 3.0 Text-to-Video
-            endpoint = "fal-ai/kling-video/v3/standard/text-to-video";
+            // Kling v1.6 Text-to-Video
+            endpoint = "fal-ai/kling-video/v1.6/standard/text-to-video";
             inputPayload = {
                 prompt: prompt,
                 aspect_ratio: selectedRatio,
@@ -82,17 +90,23 @@ app.post('/api/generate-video', async (req, res) => {
             };
         }
 
-        console.log(`Routing request to Endpoint: ${endpoint}`);
+        console.log(`Submitting request to ${endpoint}...`);
 
         const result = await fal.subscribe(endpoint, {
             input: inputPayload,
-            logs: true
+            logs: true,
+            onQueueUpdate: (update) => {
+                if (update.status === "IN_PROGRESS" && update.logs) {
+                    update.logs.map((log) => log.message).forEach((msg) => console.log(`[fal.ai Log]: ${msg}`));
+                }
+            }
         });
 
         const videoUrl = result.data?.video?.url || result.video?.url;
 
         if (videoUrl) {
-            console.log(`[Success] Kling Video Generated: ${videoUrl}`);
+            console.log(`\nVideo generated successfully!`);
+            console.log(`Video URL: ${videoUrl}`);
             return res.status(200).json({
                 success: true,
                 videoUrl: videoUrl
@@ -102,10 +116,12 @@ app.post('/api/generate-video', async (req, res) => {
         }
 
     } catch (error) {
-        console.error("[Backend Error Processing Video]:", error);
-        
-        if (error.body && error.body.detail) {
-            console.error("[fal.ai Validation Details]:", JSON.stringify(error.body.detail));
+        console.error("\nFailed to generate video.");
+        if (error.status === 422) {
+            console.error("Validation Error (422): Check input schema and endpoint path.");
+            console.error("API Response Details:", JSON.stringify(error.body, null, 2));
+        } else {
+            console.error("Error details:", error);
         }
 
         return res.status(500).json({
@@ -115,6 +131,10 @@ app.post('/api/generate-video', async (req, res) => {
     }
 });
 
+/**
+ * Route: POST /api/generate-podcast
+ * Handles Text-to-Speech Audio Generation for Podcasts.
+ */
 app.post('/api/generate-podcast', async (req, res) => {
     const isAdmin = checkAdminBypass(req);
     const { script } = req.body;
@@ -122,6 +142,8 @@ app.post('/api/generate-podcast', async (req, res) => {
     if (!script) {
         return res.status(400).json({ success: false, error: "Script content is required." });
     }
+
+    console.log(`\n[Podcast Request] Admin Bypass Active: ${isAdmin}`);
 
     try {
         const result = await fal.subscribe("fal-ai/playht/tts/v3", {
@@ -134,10 +156,15 @@ app.post('/api/generate-podcast', async (req, res) => {
         const audioUrl = result.data?.audio?.url || result.audio?.url;
 
         if (audioUrl) {
-            return res.status(200).json({ success: true, audioUrl: audioUrl });
+            console.log(`[Success] Podcast Audio Generated: ${audioUrl}`);
+            return res.status(200).json({
+                success: true,
+                audioUrl: audioUrl
+            });
         } else {
             throw new Error("No audio URL returned in the TTS payload.");
         }
+
     } catch (error) {
         console.error("[Backend Error Processing Audio]:", error);
         return res.status(500).json({
@@ -147,8 +174,10 @@ app.post('/api/generate-podcast', async (req, res) => {
     }
 });
 
+// Start Express Server Listener
 app.listen(PORT, () => {
     console.log(`====================================================`);
     console.log(`  MAGIC TORTOISE BACKEND RUNNING ON PORT ${PORT}`);
+    console.log(`  Kling AI v1.6 Engine Active`);
     console.log(`====================================================`);
 });
