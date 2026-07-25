@@ -42,7 +42,7 @@ app.get('/', (req, res) => {
 
 /**
  * Route: POST /api/generate-video
- * Handles Kling 3.0 Text-to-Video and Image-to-Video requests
+ * Handles Kling Text-to-Video and Image-to-Video requests
  */
 app.post('/api/generate-video', async (req, res) => {
     const isAdmin = checkAdminBypass(req);
@@ -61,7 +61,11 @@ app.post('/api/generate-video', async (req, res) => {
         return res.status(400).json({ success: false, error: "Please provide a prompt description or an image." });
     }
 
-    const selectedRatio = aspectRatio || "9:16";
+    // Clean up ratio formatting
+    let selectedRatio = "9:16";
+    if (aspectRatio === "16:9" || aspectRatio === "1:1" || aspectRatio === "9:16") {
+        selectedRatio = aspectRatio;
+    }
 
     console.log(`\n====================================================`);
     console.log(`[Video Request] Admin Bypass Active: ${isAdmin}`);
@@ -74,24 +78,23 @@ app.post('/api/generate-video', async (req, res) => {
         let inputPayload;
 
         if (image) {
-            // Kling 3.0 Standard Image-to-Video
-            console.log("Routing request to Kling 3.0 (Image-to-Video)...");
-            endpoint = "fal-ai/kling-video/v3/standard/image-to-video";
+            // Kling Image-to-Video Payload
+            console.log("Routing request to Kling (Image-to-Video)...");
+            endpoint = "fal-ai/kling-video/v1.5/pro/image-to-video";
             inputPayload = {
                 prompt: prompt || "",
-                start_image_url: image,
+                image_url: image,
                 duration: "5",
-                generate_audio: true
+                aspect_ratio: selectedRatio
             };
         } else {
-            // Kling 3.0 Standard Text-to-Video
-            console.log("Routing request to Kling 3.0 (Text-to-Video)...");
-            endpoint = "fal-ai/kling-video/v3/standard/text-to-video";
+            // Kling Text-to-Video Payload
+            console.log("Routing request to Kling (Text-to-Video)...");
+            endpoint = "fal-ai/kling-video/v1.5/pro/text-to-video";
             inputPayload = {
                 prompt: prompt,
                 aspect_ratio: selectedRatio,
-                duration: "5",
-                generate_audio: true
+                duration: "5"
             };
         }
 
@@ -175,6 +178,6 @@ app.post('/api/generate-podcast', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`====================================================`);
     console.log(`  MAGIC TORTOISE BACKEND RUNNING ON PORT ${PORT}`);
-    console.log(`  Kling 3.0 Engine & Admin Bypass Active`);
+    console.log(`  Kling Engine & Admin Bypass Active`);
     console.log(`====================================================`);
 });
