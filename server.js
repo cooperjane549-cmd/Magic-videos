@@ -30,6 +30,15 @@ const checkAdminBypass = (req) => {
 };
 
 /**
+ * Helper function to safely clean and trim prompts to fit within fal.ai limits (max 2500 chars)
+ */
+const sanitizePrompt = (rawPrompt) => {
+    if (!rawPrompt) return "";
+    // Clean string and cap length at 2000 characters to stay safely below 2500
+    return String(rawPrompt).trim().substring(0, 2000);
+};
+
+/**
  * Route: GET /
  * Health check endpoint for Render service uptime verification.
  */
@@ -57,6 +66,9 @@ app.post('/api/generate-video', async (req, res) => {
         return res.status(400).json({ success: false, error: "Please provide a prompt description or an image." });
     }
 
+    // Clean and validate prompt string length
+    const cleanedPrompt = sanitizePrompt(prompt);
+
     let selectedRatio = "9:16";
     if (aspectRatio === "16:9" || aspectRatio === "1:1" || aspectRatio === "9:16") {
         selectedRatio = aspectRatio;
@@ -65,7 +77,8 @@ app.post('/api/generate-video', async (req, res) => {
     console.log(`\n====================================================`);
     console.log(`[Video Request] Admin Bypass Active: ${isAdmin}`);
     console.log(`[Aspect Ratio] ${selectedRatio}`);
-    console.log(`[Prompt] "${prompt || 'Image animation'}"`);
+    console.log(`[Prompt Length] ${cleanedPrompt.length} chars`);
+    console.log(`[Prompt Text] "${cleanedPrompt || 'Image animation'}"`);
     console.log(`====================================================`);
 
     try {
@@ -76,7 +89,7 @@ app.post('/api/generate-video', async (req, res) => {
             // Kling v1.6 Image-to-Video
             endpoint = "fal-ai/kling-video/v1.6/standard/image-to-video";
             inputPayload = {
-                prompt: prompt || "",
+                prompt: cleanedPrompt || "",
                 image_url: image,
                 duration: "5"
             };
@@ -84,7 +97,7 @@ app.post('/api/generate-video', async (req, res) => {
             // Kling v1.6 Text-to-Video
             endpoint = "fal-ai/kling-video/v1.6/standard/text-to-video";
             inputPayload = {
-                prompt: prompt,
+                prompt: cleanedPrompt,
                 aspect_ratio: selectedRatio,
                 duration: "5"
             };
