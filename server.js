@@ -8,12 +8,12 @@ const cors = require('cors');
 const { fal } = require('@fal-ai/client');
 
 const app = express();
-const PORT = process.process?.env?.PORT || 10000;
+const PORT = process.env.PORT || 10000;
 
 // Enable Cross-Origin Resource Sharing (CORS)
 app.use(cors({ origin: '*' }));
 
-// Increase JSON limit to allow base64 image uploads for image-to-video requests
+// Increase JSON limit to allow base64 image uploads
 app.use(express.json({ limit: '50mb' }));
 
 // Configure fal.ai SDK with API Key from Render environment variables
