@@ -65,22 +65,24 @@ app.post('/api/generate-video', async (req, res) => {
         let inputPayload;
 
         if (image) {
-            // Kling Image-to-Video (no aspect_ratio parameter allowed)
-            endpoint = "fal-ai/kling-video/v1.5/standard/image-to-video";
+            // Kling 3.0 Image-to-Video
+            endpoint = "fal-ai/kling-video/v3/standard/image-to-video";
             inputPayload = {
                 prompt: prompt || "",
-                image_url: image,
-                duration: 5 // Must be a number integer (5 or 10)
+                start_image_url: image,
+                duration: "5"
             };
         } else {
-            // Kling Text-to-Video
-            endpoint = "fal-ai/kling-video/v1.5/standard/text-to-video";
+            // Kling 3.0 Text-to-Video
+            endpoint = "fal-ai/kling-video/v3/standard/text-to-video";
             inputPayload = {
                 prompt: prompt,
                 aspect_ratio: selectedRatio,
-                duration: 5 // Must be a number integer (5 or 10)
+                duration: "5"
             };
         }
+
+        console.log(`Routing request to Endpoint: ${endpoint}`);
 
         const result = await fal.subscribe(endpoint, {
             input: inputPayload,
@@ -102,7 +104,6 @@ app.post('/api/generate-video', async (req, res) => {
     } catch (error) {
         console.error("[Backend Error Processing Video]:", error);
         
-        // Print the exact field that failed validation if fal rejects it
         if (error.body && error.body.detail) {
             console.error("[fal.ai Validation Details]:", JSON.stringify(error.body.detail));
         }
