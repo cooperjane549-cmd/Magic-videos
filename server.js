@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 10000;
 
 // Set MOCK_MODE to true to test your Android app/WebView for $0.00 free.
 // Change to false (or set MOCK_MODE=false in Render env variables) when ready for live production.
-const MOCK_MODE = process.env.MOCK_MODE ? process.env.MOCK_MODE === 'true' : false;
+const MOCK_MODE = process.env.MOCK_MODE ? process.env.MOCK_MODE === 'true' : true;
 
 // Sample public video URL returned during MOCK_MODE testing
 const SAMPLE_MOCK_VIDEO_URL = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
