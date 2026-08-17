@@ -13,7 +13,7 @@ const admin = require('firebase-admin');
 const serviceAccount = require('./serviceAccountKey.json');
 admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
-    databaseURL: "https://YOUR_FIREBASE_PROJECT_ID-default-rtdb.firebaseio.com" // Replace with your DB URL
+    databaseURL: "https://magic-tortoise-default-rtdb.firebaseio.com" // Replace with your DB URL
 });
 
 const db = admin.database();
