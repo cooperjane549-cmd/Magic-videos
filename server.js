@@ -17,7 +17,10 @@ const PORT = process.env.PORT || 10000;
 
 const MOCK_MODE = process.env.MOCK_MODE ? process.env.MOCK_MODE === 'true' : ENABLE_FREE_MOCK_MODE;
 const SAMPLE_MOCK_VIDEO_URL = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
+const SAMPLE_MOCK_AUDIO_URL = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
+
 const VIDEO_GENERATION_COST = 120.0;
+const PODCAST_GENERATION_COST = 60.0;
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -104,10 +107,80 @@ app.post('/api/generate-video', async (req, res) => {
         }
 
     } catch (error) {
-        console.error("[Backend Error]:", error);
+        console.error("[Backend Video Error]:", error);
         return res.status(500).json({
             success: false,
             error: error.message || "Failed to generate video."
+        });
+    }
+});
+
+app.post('/api/generate-podcast', async (req, res) => {
+    const { userId, script } = req.body;
+    const adminBypass = req.headers['x-admin-bypass'];
+
+    if (!script) {
+        return res.status(400).json({ success: false, error: "Please provide a podcast script." });
+    }
+
+    const isAdminBypass = (adminBypass === "Tortoise0008");
+
+    if (!isAdminBypass) {
+        if (!userId) {
+            return res.status(401).json({ success: false, error: "User authentication ID (userId) is required." });
+        }
+
+        const userBalanceRef = db.ref(`users/${userId}/balance`);
+
+        // Server-side balance transaction for podcast (KES 60.00)
+        const transactionResult = await userBalanceRef.transaction((currentBalance) => {
+            if (currentBalance === null) return 0;
+            if (currentBalance >= PODCAST_GENERATION_COST) {
+                return currentBalance - PODCAST_GENERATION_COST;
+            } else {
+                return; // Abort transaction
+            }
+        });
+
+        if (!transactionResult.committed) {
+            return res.status(402).json({
+                success: false,
+                error: `Insufficient balance. Generating a podcast costs KES ${PODCAST_GENERATION_COST.toFixed(2)}.`
+            });
+        }
+    }
+
+    try {
+        if (MOCK_MODE) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            return res.status(200).json({
+                success: true,
+                audioUrl: SAMPLE_MOCK_AUDIO_URL
+            });
+        }
+
+        // FAL AI PlayAI / Audio TTS Integration Call
+        const result = await fal.subscribe("fal-ai/playht/tts/v3", {
+            input: {
+                prompt: script,
+                voice: "Jennifer (English (US)/American)"
+            },
+            logs: true
+        });
+
+        const audioUrl = result.data?.audio?.url || result.audio?.url;
+
+        if (audioUrl) {
+            return res.status(200).json({ success: true, audioUrl: audioUrl });
+        } else {
+            throw new Error("No audio URL returned in payload.");
+        }
+
+    } catch (error) {
+        console.error("[Backend Podcast Error]:", error);
+        return res.status(500).json({
+            success: false,
+            error: error.message || "Failed to generate podcast audio."
         });
     }
 });
